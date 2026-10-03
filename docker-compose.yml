@@ -1,0 +1,12 @@
+services:
+  mongo:
+    image: mongo:7
+    container_name: vp-optimizer-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - vp_optimizer_mongo:/data/db
+
+volumes:
+  vp_optimizer_mongo:

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="theme-color" content="#0d6d59" />
+  <title>VP Optimizer</title>
+  <script>
+    /* Apply a saved preference before CSS paints, avoiding a theme flash. */
+    (function () {
+      try {
+        var prefs = JSON.parse(localStorage.getItem('vp-optimizer-prefs-v1') || '{}');
+        var theme = prefs.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        document.documentElement.dataset.theme = theme;
+      } catch (e) { document.documentElement.dataset.theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; }
+    }());
+  </script>
+  <link rel="stylesheet" href="css/styles.css?v=backend-20261003" />
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#catalogue" aria-label="VP Optimizer home"><span class="brand-mark">VP</span><span>VP Optimizer<small>basket planning</small></span></a>
+    <nav class="main-nav" aria-label="Primary navigation">
+      <button data-view="catalogue">Catalogue</button>
+      <button data-view="optimize">Optimize</button>
+      <button data-view="calculator">Calculator</button>
+    </nav>
+    <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle dark mode"><span aria-hidden="true">◐</span><span class="theme-label">Theme</span></button>
+  </header>
+  <main class="app-shell">
+    <section id="catalogue-view" class="app-view" aria-label="Catalogue"></section>
+    <section id="optimize-view" class="app-view" aria-label="Optimize"></section>
+    <section id="calculator-view" class="app-view" aria-label="Calculator"></section>
+  </main>
+  <footer>VP Optimizer works in this browser. Catalogue data is stored locally on this device.</footer>
+  <script type="module" src="js/main.js?v=ux-20261002"></script>
+</body>
+</html>

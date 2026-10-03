@@ -1,0 +1,37 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>VP Optimizer tests</title><style>body{font:14px system-ui;margin:28px;background:#f5f8f7;color:#17252a}h1{margin-bottom:4px}.pass,.fail{padding:8px 10px;margin:5px 0;border-radius:7px;background:#e7f6ee}.fail{background:#ffe9e8;color:#8b2727}code{font-family:ui-monospace,monospace}.total{font-weight:800;margin:16px 0}</style></head><body><h1>VP Optimizer unit tests</h1><p>Framework-free checks for the pure modules.</p><div id="summary" class="total"></div><div id="output"></div><script type="module">
+import { priceProduct, priceBasket, formatVp } from '../js/pricing.js';
+import { run, vpScaleFor } from '../js/engine.js';
+import { escapeHtml, sanitizeText, validateProduct } from '../js/validation.js';
+import { parseCsv, serialiseCsv } from '../js/csv.js';
+import { createLocalStorageRepository } from '../js/repository.js';
+const output=document.querySelector('#output');let passed=0,failed=0;
+function test(name,fn){try{fn();passed++;output.insertAdjacentHTML('beforeend',`<div class="pass">✓ ${name}</div>`)}catch(e){failed++;output.insertAdjacentHTML('beforeend',`<div class="fail">✗ ${name}<br><code>${e.message}</code></div>`)}}
+function equal(actual,expected,msg=''){if(actual!==expected)throw Error(`${msg} expected ${expected}, got ${actual}`)}function ok(value,msg='Assertion failed'){if(!value)throw Error(msg)}
+const one={id:'one',name:'One',mrp:100000,vp:100};
+test('₹1000 at 20% and 18% GST is ₹944',()=>{const p=priceBasket([{product:one,quantity:1}],{discount:20,gst:18});equal(p.totalNet,80000);equal(p.gst,14400);equal(p.final,94400)});
+test('GST zero leaves discounted payable unchanged',()=>equal(priceBasket([{product:one,quantity:1}],{discount:20,gst:0}).final,80000));
+test('per-product discount rounding, not lump-sum discount',()=>{const p={mrp:5,vp:1};equal(priceBasket([{product:p,quantity:2}],{discount:50,gst:0}).totalNet,6)});
+test('GST is charged once on total, not per unit',()=>{const p={mrp:25,vp:1};equal(priceBasket([{product:p,quantity:2}],{gst:18}).gst,9)});
+test('GST groups per product GST rate',()=>{const p=priceBasket([{product:{mrp:100,vp:1,rates:{gst:5}},quantity:1},{product:{mrp:100,vp:1,rates:{gst:18}},quantity:1}],{gst:0});equal(p.gst,23)});
+test('product rate override wins over global rate',()=>equal(priceProduct({mrp:10000,rates:{discount:10}},{discount:50}).discountedUnit,9000));
+test('VP zero gives null cost per VP',()=>equal(priceBasket([{product:{mrp:100,vp:0},quantity:1}]).costPerVP,null));
+test('VP formatting is clean',()=>equal(formatVp(12.5),'12.5'));
+test('HTML escapes and text strips markup brackets',()=>{equal(escapeHtml('<x>'),'&lt;x&gt;');equal(sanitizeText('<b> Hi </b>'),'b Hi /b')});
+test('negative product values are rejected',()=>ok(!validateProduct({name:'X',mrp:'-1',vp:'2'}).ok));
+test('fractional VP chooses scale 10',()=>equal(vpScaleFor([{vp:12.5}]),10));
+test('fractional VP target can be exact',()=>{const r=run({items:[{product:{id:'a',name:'A',mrp:100,vp:12.5},mode:'allowed',minQty:0}],target:25,tolerance:0,gst:0,discount:0});equal(r.solutions[0].totalVP,25)});
+test('absolute tolerance range is returned',()=>{const r=run({items:[{product:{id:'a',mrp:1,vp:10},mode:'allowed'}],target:20,tolerance:3,toleranceMode:'absolute'});equal(r.range.low,17);equal(r.range.high,23)});
+test('excluded product is never used',()=>{const r=run({items:[{product:{id:'a',mrp:1,vp:10},mode:'excluded'},{product:{id:'b',mrp:2,vp:5},mode:'allowed'}],target:5,tolerance:0});equal(r.solutions[0].products[0].id,'b')});
+test('required product is seeded',()=>{const r=run({items:[{product:{id:'a',mrp:1,vp:10},mode:'required'}],target:10,tolerance:0});equal(r.solutions[0].products[0].quantity,1)});
+test('allowed minimum is always included',()=>{const r=run({items:[{product:{id:'a',mrp:1,vp:10},mode:'allowed',minQty:2}],target:10,tolerance:0});equal(r.status,'none');equal(r.closest[0].products[0].quantity,2)});
+test('product maximum is respected',()=>{const r=run({items:[{product:{id:'a',mrp:1,vp:10,max:1},mode:'allowed'}],target:20,tolerance:0});equal(r.status,'none')});
+test('exact target ranks ahead of merely close result',()=>{const r=run({items:[{product:{id:'a',mrp:100,vp:9},mode:'allowed'},{product:{id:'b',mrp:200,vp:10},mode:'allowed'}],target:10,tolerance:20});equal(r.solutions[0].totalVP,10)});
+test('custom cost-first ranking changes winner',()=>{const r=run({items:[{product:{id:'a',mrp:100,vp:9},mode:'allowed'},{product:{id:'b',mrp:200,vp:10},mode:'allowed'}],target:10,tolerance:20,ranking:['withinRange','cost','absDistance']});equal(r.solutions[0].totalVP,9)});
+test('duplicate product selections collapse',()=>{const p={id:'a',mrp:100,vp:10};const r=run({items:[{product:p,mode:'allowed'},{product:p,mode:'allowed'}],target:10,tolerance:0});equal(r.solutions.length,1)});
+test('no-valid result is explicitly marked none',()=>{const r=run({items:[{product:{id:'a',mrp:1,vp:10},mode:'allowed'}],target:7,tolerance:0});equal(r.status,'none');ok(r.closest.length>0)});
+test('target cap is validated',()=>equal(run({items:[{product:{id:'a',mrp:1,vp:1},mode:'allowed'}],target:5001}).status,'error'));
+test('CSV quoted values round trip',()=>{const rows=parseCsv(serialiseCsv([{id:'1',name:'A, B',mrp:'10.00'}],['id','name','mrp']));equal(rows[0].name,'A, B')});
+test('repository skips matching import duplicates',()=>{const r=createLocalStorageRepository({productsKey:'test-products-'+Date.now(),prefsKey:'test-prefs-'+Date.now()});r.saveMany([{name:'A',sku:'X',mrp:100,vp:1},{name:'A',sku:'X',mrp:100,vp:1}]);equal(r.getAll().length,1)});
+test('sample scenario finds D×2 + B×1 as cheapest 500 VP',()=>{const r=run({items:[{product:{id:'A',mrp:300000,vp:50,max:4},mode:'allowed'},{product:{id:'B',mrp:300000,vp:100,max:5},mode:'allowed'},{product:{id:'D',mrp:500000,vp:200,max:5},mode:'allowed'}],discount:20,gst:18,target:500,tolerance:10});equal(r.solutions[0].final,1227200);const q=Object.fromEntries(r.solutions[0].products.map(p=>[p.id,p.quantity]));equal(q.B,1);equal(q.D,2)});
+document.querySelector('#summary').textContent=`${passed} passed · ${failed} failed`;document.querySelector('#summary').style.color=failed?'#8b2727':'#076249';
+</script></body></html>

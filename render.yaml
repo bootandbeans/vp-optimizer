@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: vp-optimizer
+    runtime: node
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: MONGODB_URI
+        sync: false
+      - key: MONGODB_DB
+        value: vp_optimizer
