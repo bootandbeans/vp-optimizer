@@ -103,7 +103,7 @@ export function createLocalStorageRepository({ productsKey = PRODUCTS_KEY, prefs
  */
 export function createHttpRepository({ baseUrl = '/api/products' } = {}) {
   const request = async (path = '', options = {}) => {
-    const response = await fetch(`${baseUrl}${path}`, { headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }, ...options });
+    const response = await fetch(`${baseUrl}${path}`, { credentials: 'same-origin', headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }, ...options });
     if (!response.ok) {
       let detail = '';
       try { detail = (await response.json())?.error || ''; } catch (_) { /* response had no JSON body */ }
