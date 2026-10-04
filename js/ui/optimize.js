@@ -7,7 +7,25 @@ const base = () => ({
   inputs: { discount: 0, gst: 18, target: 500, tolerance: 10, toleranceMode: 'percent' },
   result: null, message: '',
 });
-const stateFor = (app) => (app.session.optimize ||= base());
+const resultIsRenderable = (result) => result && typeof result === 'object'
+  && Array.isArray(result.solutions) && Array.isArray(result.closest)
+  && [...result.solutions, ...result.closest].every((solution) => solution && Array.isArray(solution.lines));
+// A basket restored from My History intentionally contains only its inputs and
+// selection. Hydrate the missing visual state before the screen reads it.
+const stateFor = (app) => {
+  const local = app.session.optimize && typeof app.session.optimize === 'object' ? app.session.optimize : (app.session.optimize = {});
+  const defaults = base();
+  local.search ??= defaults.search;
+  local.category ??= defaults.category;
+  local.selection = local.selection && typeof local.selection === 'object' ? local.selection : {};
+  local.inputs = { ...defaults.inputs, ...(local.inputs && typeof local.inputs === 'object' ? local.inputs : {}) };
+  // Engine results are runtime-only. Older saved sessions can contain a
+  // partially serialised result (for example lines: null); discard it safely.
+  if (local.result && !resultIsRenderable(local.result)) local.result = null;
+  local.result ??= null;
+  local.message ??= '';
+  return local;
+};
 const cats = (products) => [...new Set(products.map((p) => p.category).filter(Boolean))].sort((a, b) => a.localeCompare(b));
 const selectionOf = (local, product) => local.selection[product.id] || { mode: 'excluded', minQty: 0 };
 const rangeText = (input) => {
@@ -17,7 +35,9 @@ const rangeText = (input) => {
   return `${formatVp(Math.max(0, target - span))} – ${formatVp(Math.min(5000, target + span))} VP`;
 };
 function lines(solution) {
-  return `<ul class="result-lines">${solution.lines.map((line) => `<li><span><b>${escapeHtml(line.name)}</b> <small>× ${line.quantity}</small></span><span>${formatVp(line.vp)} VP · line MRP ${formatMoney(line.lineMrp)}</span></li>`).join('')}</ul>`;
+  const basketLines = Array.isArray(solution?.lines) ? solution.lines : [];
+  if (!basketLines.length) return '<p class="result-lines-empty">Line details are unavailable for this older result. Run the search again to refresh it.</p>';
+  return `<ul class="result-lines">${basketLines.map((line) => `<li><span><b>${escapeHtml(line.name)}</b> <small>× ${line.quantity}</small></span><span>${formatVp(line.vp)} VP · line MRP ${formatMoney(line.lineMrp)}</span></li>`).join('')}</ul>`;
 }
 function reason(solution, first, target) {
   if (!first || solution === first) return solution.difference === 0 ? 'Chosen because it hits your target exactly at the lowest payable amount.' : `Chosen for its ${formatVp(Math.abs(solution.difference))} VP distance from the ${formatVp(target)} VP target.`;
@@ -30,7 +50,7 @@ function resultCard(solution, index, kind, target, first) {
   const label = solution.difference === 0 ? 'Exact' : valid ? 'Within tolerance' : 'Outside requested range';
   return `<article class="result-card ${valid ? 'valid-card' : 'reference-card'} rank-${index + 1}">
     ${valid ? '' : '<div class="invalid-ribbon">Not a valid result</div>'}
-    <header><div class="rank">#${index + 1}</div><div><span class="result-label ${valid ? 'good' : 'warn'}">${escapeHtml(label)}</span><h3>${formatVp(solution.totalVP)} VP <small>(${solution.difference > 0 ? '+' : ''}${formatVp(solution.difference)} from target)</small></h3></div><button class="button small subtle" data-pdf-card="${kind}:${index}">⇩ PDF</button></header>
+    <header><div class="rank">#${index + 1}</div><div><span class="result-label ${valid ? 'good' : 'warn'}">${escapeHtml(label)}</span><h3>${formatVp(solution.totalVP)} VP <small>(${solution.difference > 0 ? '+' : ''}${formatVp(solution.difference)} from target)</small></h3></div><div class="result-card-actions"><button class="button small subtle" data-save-basket="${kind}:${index}">☆ Save</button><button class="button small subtle" data-pdf-card="${kind}:${index}">⇩ PDF</button></div></header>
     ${lines(solution)}
     <div class="result-tiles"><div><span>Total MRP</span><b>${formatMoney(solution.totalMrp)}</b></div><div><span>Total discount</span><b>−${formatMoney(solution.totalDiscount)}</b></div><div><span>Total VP</span><b>${formatVp(solution.totalVP)}</b></div></div>
     <div class="payable"><span>Final payable <small>GST included once on the taxable total</small></span><b>${formatMoney(solution.final)}</b></div>
@@ -41,7 +61,8 @@ function resultsHtml(local) {
   const result = local.result;
   if (!result) return '<section class="results-placeholder"><span>⌁</span><h2>Ready when you are</h2><p>Choose products, set a VP target, then find the most economical baskets.</p></section>';
   if (result.status === 'error') return `<section class="notice error" role="alert">${escapeHtml(result.message)}</section>`;
-  const valid = result.solutions || []; const outside = result.closest || [];
+  const valid = Array.isArray(result.solutions) ? result.solutions.filter((solution) => Array.isArray(solution?.lines)) : [];
+  const outside = Array.isArray(result.closest) ? result.closest.filter((solution) => Array.isArray(solution?.lines)) : [];
   const range = result.range || {};
   return `<section class="result-summary"><span>✓ ${valid.length} inside range</span><span>⚠ ${outside.length} outside range</span><span>Target <b>${formatVp(result.target)} VP</b></span><span>Accepted <b>${formatVp(range.low)} – ${formatVp(range.high)} VP</b></span><div class="summary-actions">${valid.length ? '<button class="button small primary" data-pdf-set="valid">Save valid as PDF</button>' : ''}${(valid.length || outside.length) ? '<button class="button small subtle" data-pdf-set="all">Save all as PDF</button>' : ''}</div></section>
     <div class="result-panels"><section class="result-panel valid-panel"><header><div><span class="panel-icon">✓</span><h2>Valid combinations <em>VALID</em></h2><p>Inside your requested VP range — these are the answers.</p></div></header>${valid.length ? valid.map((entry, index) => resultCard(entry, index, 'valid', result.target, valid[0])).join('') : `<div class="empty-panel"><b>No valid combinations</b><p>${escapeHtml(result.message)}</p></div>`}</section>
@@ -50,7 +71,7 @@ function resultsHtml(local) {
 
 export function renderOptimize(container, app) {
   const local = stateFor(app);
-  const active = app.products.filter((product) => product.active !== false);
+  const active = (Array.isArray(app.products) ? app.products : []).filter((product) => product.active !== false);
   const needle = local.search.toLowerCase().trim();
   const filtered = active.filter((product) => (!needle || [product.name, product.sku, product.category].join(' ').toLowerCase().includes(needle)) && (!local.category || product.category === local.category));
   container.innerHTML = `<section class="view-heading"><div><p class="eyebrow">Bounded VP search</p><h1>Optimize a basket</h1><p>Only products you allow are handed to the optimizer. Required and minimum quantities are always included.</p></div></section>
@@ -77,9 +98,10 @@ export function renderOptimize(container, app) {
     if (!chosen.length) { error.textContent = 'Please select at least one product.'; return; }
     const invalidMinimum = chosen.find(({ product, minQty, mode }) => product.max !== undefined && product.max !== '' && Math.max(Number(product.min) || 0, Number(minQty) || 0, mode === 'required' ? 1 : 0) > Number(product.max));
     if (invalidMinimum) { error.textContent = `Minimum quantity exceeds Max qty for ${invalidMinimum.product.name}.`; return; }
-    error.textContent = ''; local.inputs = checked.value; local.result = app.actions.runOptimize({ ...checked.value, items: chosen }); persist(); renderOptimize(container, app);
+    error.textContent = ''; local.inputs = checked.value; local.result = app.actions.runOptimize({ ...checked.value, items: chosen }); void app.actions.recordActivity('optimize', { inputs: checked.value, selection: chosen.map((entry) => ({ productId: entry.product.id, mode: entry.mode, minQty: entry.minQty || 0 })), status: local.result.status, validResults: local.result.solutions.map((solution) => ({ totalVP: solution.totalVP, final: solution.final })), referenceResults: local.result.closest.map((solution) => ({ totalVP: solution.totalVP, final: solution.final })) }); persist(); renderOptimize(container, app);
   };
   const result = local.result;
   container.querySelectorAll('[data-pdf-card]').forEach((button) => { button.onclick = () => { const [kind, index] = button.dataset.pdfCard.split(':'); const solution = kind === 'valid' ? result.solutions[Number(index)] : result.closest[Number(index)]; printInvoice({ title: `VP optimizer ${kind === 'valid' ? 'valid result' : 'reference basket'}`, result: solution, subtitle: `${formatVp(solution.totalVP)} VP · target ${formatVp(result.target)} VP` }); }; });
+  container.querySelectorAll('[data-save-basket]').forEach((button) => { button.onclick = async () => { const [kind, index] = button.dataset.saveBasket.split(':'); const solution = kind === 'valid' ? result.solutions[Number(index)] : result.closest[Number(index)]; const name = prompt('Name this optimizer basket:', `VP ${formatVp(solution.totalVP)} basket`); if (!name?.trim()) return; button.disabled = true; try { await app.actions.saveBasket({ name: name.trim(), type: 'optimizer', data: { inputs: local.inputs, selection: Object.entries(local.selection).map(([productId, choice]) => ({ productId, mode: choice.mode, minQty: choice.minQty || 0 })), result: { totalVP: solution.totalVP, final: solution.final, lines: solution.lines.map((line) => ({ productId: line.id, quantity: line.quantity, vp: line.vp, lineMrp: line.lineMrp })) } } }); button.textContent = 'Saved ✓'; } catch (error) { alert(error.message || 'Could not save this basket.'); button.disabled = false; } }; });
   container.querySelectorAll('[data-pdf-set]').forEach((button) => { button.onclick = () => { const list = button.dataset.pdfSet === 'valid' ? result.solutions : [...result.solutions, ...result.closest]; printSolutions({ solutions: list, title: button.dataset.pdfSet === 'valid' ? 'Valid VP combinations' : 'VP combinations', subtitle: `Target ${formatVp(result.target)} VP · accepted ${formatVp(result.range.low)}–${formatVp(result.range.high)} VP` }); }; });
 }

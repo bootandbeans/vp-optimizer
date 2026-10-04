@@ -68,11 +68,28 @@ Render's free web services sleep after idle time, so the first request can take 
 
 On its first successful API connection, the app copies any catalogue and session preferences previously stored in this browser's `localStorage` into MongoDB. Afterwards, catalogue CRUD and CSV import/export use MongoDB through the API. Existing users therefore do not lose their current sample or custom catalogue when switching to the backend.
 
-## Admin authentication
+## Accounts, roles, and privacy-aware traffic storage
 
-The site now opens on a password-only administrator login screen. The password is checked only by the server against `ADMIN_PASSWORD`; it is never written to browser storage or frontend code. On success, the server issues an 8-hour signed, `HttpOnly`, `SameSite=Strict` cookie. Catalogue and preference routes reject unsigned/expired sessions with `401`.
+The sign-in screen supports three paths:
 
-Login attempts are limited to five failed attempts per IP address in ten minutes. This is intentionally a small single-admin protection layer, not a multi-user identity system. Change `ADMIN_PASSWORD` and `SESSION_SECRET` in your host dashboard to revoke existing access; redeploy afterwards.
+- **Create account** — regular users register with email and a password of at least 10 characters.
+- **Sign in** — regular users return using their email/password.
+- **Admin** — click the **Admin** tab and enter the environment-only `ADMIN_PASSWORD`. No administrator email is required.
+
+Password hashes use Node's `scrypt` with a unique random salt per user. Neither admin nor user passwords are stored in frontend code, browser storage, or MongoDB plaintext. An 8-hour signed, `HttpOnly`, `SameSite=Strict` session cookie protects authenticated requests. Login attempts are limited to five failed attempts per IP in ten minutes.
+
+| Role | Catalogue | Optimizer / Calculator | Traffic overview |
+| --- | --- | --- | --- |
+| `admin` | Full add/edit/delete/import/export | Yes | Yes |
+| `user` | Read-only/export | Yes | No |
+
+MongoDB now contains these additional collections:
+
+- `users` — email, password salt/hash, account dates, and analytics consent only.
+- `user_activities` — signed-in optimizer runs and user-saved calculator baskets.
+- `traffic_events` — consent-based anonymous page/feature activity. Raw IP addresses are not stored; the server stores a one-way short HMAC instead.
+
+The first time a signed-in visitor opens the app, they can explicitly allow or decline anonymous analytics. Activity required for their own signed-in workflow is stored separately. Change both `ADMIN_PASSWORD` and `SESSION_SECRET` in the host dashboard to revoke administrator access and all active sessions, then redeploy.
 
 ## API
 
@@ -81,17 +98,19 @@ All API routes are served from the same origin:
 | Method | Route | Purpose |
 | --- | --- | --- |
 | `GET` | `/api/health` | Connection check; deliberately public |
-| `GET` | `/api/auth/session` | Check current admin session |
-| `POST` | `/api/auth/login` | Sign in with `{ "password": "..." }` |
-| `POST` | `/api/auth/logout` | Clear the administrator session |
-| `GET` | `/api/products` | List products; requires admin session |
-| `GET` | `/api/products/:id` | Get one product |
-| `POST` | `/api/products` | Create product |
-| `PUT` | `/api/products/:id` | Update/upsert product |
-| `DELETE` | `/api/products/:id` | Delete product |
-| `DELETE` | `/api/products` | Clear catalogue |
-| `POST` | `/api/products/bulk` | Import non-duplicate products |
-| `GET` / `PATCH` | `/api/products/prefs` | Persist theme and session context |
+| `GET` | `/api/auth/session` | Check current session |
+| `POST` | `/api/auth/register` | Create a regular user account |
+| `POST` | `/api/auth/login` | Sign in a regular user with email/password |
+| `POST` | `/api/auth/admin-login` | Sign in with `ADMIN_PASSWORD` |
+| `POST` | `/api/auth/logout` | Clear the active session |
+| `POST` | `/api/telemetry` | Consent-based anonymous page/feature event |
+| `POST` | `/api/activity` | Save optimizer or calculator activity for the signed-in user |
+| `GET` | `/api/products` | List products; any signed-in user |
+| `GET` | `/api/products/:id` | Get one product; any signed-in user |
+| `POST` / `PUT` / `DELETE` | `/api/products…` | Product changes; administrator only |
+| `POST` | `/api/products/bulk` | Import non-duplicate products; administrator only |
+| `GET` / `PATCH` | `/api/products/prefs` | Persist per-user theme and session context |
+| `GET` | `/api/admin/traffic-summary` | 30-day user/traffic totals; administrator only |
 
 Products remain the same simple JSON document used by the UI:
 
@@ -121,3 +140,34 @@ http://localhost:8080/tests/tests.html
 ```
 
 They exercise pricing, GST rounding, validation, CSV, repository behavior, and the pure optimization engine.
+
+## Google Sign-In
+
+Google Sign-In is optional. The app continues to support email/password user accounts and the environment-only administrator password when Google credentials are absent.
+
+1. In [Google Cloud Console](https://console.cloud.google.com/), create or select a project.
+2. Configure the OAuth consent screen. For a testing app, add your test Google accounts.
+3. Create **OAuth client ID → Web application** credentials.
+4. Add these exact redirect URLs:
+
+```text
+http://localhost:8080/api/auth/google/callback
+https://YOUR-RENDER-SERVICE.onrender.com/api/auth/google/callback
+```
+
+5. Set these server-only environment variables. Never put the client secret in browser JavaScript:
+
+```bash
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+GOOGLE_CALLBACK_URL=http://localhost:8080/api/auth/google/callback
+```
+
+For Render, set `GOOGLE_CALLBACK_URL` to the HTTPS `onrender.com` callback URL instead. Restart/redeploy the server; the **Continue with Google** button appears automatically when all three settings are present.
+
+## Saved baskets, history, and administration
+
+- Any signed-in user can save a calculator basket or an optimizer result, then reopen it from **My History**.
+- Optimizer runs and saved calculator activities are stored per account in `user_activities`.
+- The **Admin** navigation item appears only for the environment-password administrator. It shows recent traffic totals, user accounts, saved activities, and lets the admin disable or re-enable an account.
+- Disabling an account blocks that user from protected API routes immediately, even if their browser still has a session cookie.

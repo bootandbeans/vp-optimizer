@@ -15,7 +15,7 @@
       } catch (e) { document.documentElement.dataset.theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; }
     }());
   </script>
-  <link rel="stylesheet" href="css/styles.css?v=backend-20261003" />
+  <link rel="stylesheet" href="css/styles.css?v=runtime-safety-v2-20261004" />
 </head>
 <body>
   <header class="topbar">
@@ -24,16 +24,21 @@
       <button data-view="catalogue">Catalogue</button>
       <button data-view="optimize">Optimize</button>
       <button data-view="calculator">Calculator</button>
+      <button data-view="history">My History</button>
+      <button data-view="admin" data-admin-nav hidden>Admin</button>
     </nav>
     <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle dark mode"><span aria-hidden="true">◐</span><span class="theme-label">Theme</span></button>
+    <span id="account-indicator" class="account-indicator" hidden></span>
     <button id="logout-button" class="logout-button" type="button" hidden>Sign out</button>
   </header>
   <main class="app-shell">
     <section id="catalogue-view" class="app-view" aria-label="Catalogue"></section>
     <section id="optimize-view" class="app-view" aria-label="Optimize"></section>
     <section id="calculator-view" class="app-view" aria-label="Calculator"></section>
+    <section id="history-view" class="app-view" aria-label="My History"></section>
+    <section id="admin-view" class="app-view" aria-label="Administrator dashboard"></section>
   </main>
   <footer>VP Optimizer · protected administrator workspace · catalogue data is stored securely through the connected backend.</footer>
-  <script type="module" src="js/main.js?v=admin-auth-20261004"></script>
+  <script type="module" src="js/main.js?v=runtime-safety-v2-20261004"></script>
 </body>
 </html>
